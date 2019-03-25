@@ -20,6 +20,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -152,47 +153,48 @@ func probeUserContainer() bool {
 	return err == nil
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	proxy := proxyForRequest(r)
+func handler(logger *zap.SugaredLogger) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		proxy := proxyForRequest(r)
 
-	ph := knativeProbeHeader(r)
-	switch {
-	case ph != "":
-		if ph != queue.Name {
-			http.Error(w, fmt.Sprintf("unexpected probe header value: %q", ph), http.StatusServiceUnavailable)
+		ph := knativeProbeHeader(r)
+		switch {
+		case ph != "":
+			if ph != queue.Name {
+				http.Error(w, fmt.Sprintf("unexpected probe header value: %q", ph), http.StatusServiceUnavailable)
+				return
+			}
+			if probeUserContainer() {
+				// Respond with the name of the component handling the request.
+				w.Write([]byte(queue.Name))
+			} else {
+				http.Error(w, "container not ready", http.StatusServiceUnavailable)
+			}
+			return
+		case isKubeletProbe(r):
+			// Do not count health checks for concurrency metrics
+			proxy.ServeHTTP(w, r)
 			return
 		}
-		if probeUserContainer() {
-			// Respond with the name of the component handling the request.
-			w.Write([]byte(queue.Name))
+
+		// Metrics for autoscaling
+		reqChan <- queue.ReqEvent{Time: time.Now(), EventType: queue.ReqIn}
+		defer func() {
+			reqChan <- queue.ReqEvent{Time: time.Now(), EventType: queue.ReqOut}
+		}()
+
+		// Enforce queuing and concurrency limits
+		if breaker != nil {
+			ok := breaker.Maybe(func() {
+				proxy.ServeHTTP(w, r)
+			})
+			if !ok {
+				http.Error(w, "overload", http.StatusServiceUnavailable)
+			}
 		} else {
-			http.Error(w, "container not ready", http.StatusServiceUnavailable)
-		}
-		return
-	case isKubeletProbe(r):
-		// Do not count health checks for concurrency metrics
-		proxy.ServeHTTP(w, r)
-		return
-	}
-
-	// Metrics for autoscaling
-	reqChan <- queue.ReqEvent{Time: time.Now(), EventType: queue.ReqIn}
-	defer func() {
-		reqChan <- queue.ReqEvent{Time: time.Now(), EventType: queue.ReqOut}
-	}()
-
-	// Enforce queuing and concurrency limits
-	if breaker != nil {
-		ok := breaker.Maybe(func() {
 			proxy.ServeHTTP(w, r)
-		})
-		if !ok {
-			http.Error(w, "overload", http.StatusServiceUnavailable)
 		}
-	} else {
-		proxy.ServeHTTP(w, r)
 	}
-
 }
 
 // Sets up /health and /wait-for-drain endpoints.
@@ -272,10 +274,28 @@ func main() {
 		Handler: createAdminHandlers(),
 	}
 
+	// TODO: Wrap this in a method and add a unit test to check if the transport implements Hijack() and Flush()
+
+	timeoutHandler := queue.TimeToFirstByteTimeoutHandler(http.HandlerFunc(handler(logger)),
+		time.Duration(revisionTimeoutSeconds)*time.Second, "request timeout")
+
+	// BUGBUG: This requires proper JSON value escaping!!!!
+	const requestLogTemplateStr = "{\"httpRequest\": {" +
+		"\"requestMethod\": \"{{.Request.Method}}\", " +
+		"\"requestUrl\": \"{{.Request.RequestURI}}\", " +
+		"\"requestSize\": \"{{.Request.ContentLength}}\", " +
+		"\"status\": {{.ResponseCode}}, " +
+		"\"responseSize\": \"222\", " +
+		"\"userAgent\": \"{{.Request.UserAgent}}\", " +
+		"\"remoteIp\": \"{{.Request.RemoteAddr}}\", " +
+		"\"serverIp\": \"\", " +
+		"\"referer\": \"{{.Request.Referer}}\", " +
+		"\"latency\": \"{{printf \"%.2f\"s .ResponseLatency}}\", " +
+		"\"protocol\": \"{{.Request.Proto}}\"}}\n"
+	requestLogTemplate := template.Must(template.New("requestLog").Parse(requestLogTemplateStr))
+	requestLogHandler := queue.RequestLogHandler(timeoutHandler, os.Stdout, requestLogTemplate)
 	server = h2c.NewServer(
-		fmt.Sprintf(":%d", v1alpha1.RequestQueuePort),
-		queue.TimeToFirstByteTimeoutHandler(http.HandlerFunc(handler),
-			time.Duration(revisionTimeoutSeconds)*time.Second, "request timeout"))
+		fmt.Sprintf(":%d", v1alpha1.RequestQueuePort), requestLogHandler)
 
 	errChan := make(chan error, 2)
 	defer close(errChan)
