@@ -49,7 +49,7 @@ type templateInput struct {
 }
 
 func (h *requestLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	rw := &requestLogWriter{}
+	rw := &requestLogWriter{writer: w}
 	startTime := time.Now()
 	defer func() {
 		err := recover()

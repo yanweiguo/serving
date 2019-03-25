@@ -285,14 +285,20 @@ func main() {
 		"\"requestUrl\": \"{{.Request.RequestURI}}\", " +
 		"\"requestSize\": \"{{.Request.ContentLength}}\", " +
 		"\"status\": {{.ResponseCode}}, " +
-		"\"responseSize\": \"222\", " +
+		"\"responseSize\": \"240\", " +
 		"\"userAgent\": \"{{.Request.UserAgent}}\", " +
 		"\"remoteIp\": \"{{.Request.RemoteAddr}}\", " +
 		"\"serverIp\": \"\", " +
 		"\"referer\": \"{{.Request.Referer}}\", " +
-		"\"latency\": \"{{printf \"%.2f\"s .ResponseLatency}}\", " +
+		"\"latency\": \"{{.ResponseLatency}}s\", " +
+		"\"latency2\": \"{{.ResponseLatency}}s\", " +
 		"\"protocol\": \"{{.Request.Proto}}\"}}\n"
 	requestLogTemplate := template.Must(template.New("requestLog").Parse(requestLogTemplateStr))
+
+	// BUGBUG: WE SHOULD USE A BUFFERED OUTPUT TO STDOUT
+	// f := bufio.NewWriter(os.Stdout)
+	// defer f.Flush()
+	// f.Write(b)
 	requestLogHandler := queue.RequestLogHandler(timeoutHandler, os.Stdout, requestLogTemplate)
 	server = h2c.NewServer(
 		fmt.Sprintf(":%d", v1alpha1.RequestQueuePort), requestLogHandler)
@@ -320,7 +326,6 @@ func main() {
 		os.Exit(1)
 	case <-signals.SetupSignalHandler():
 		logger.Info("Received TERM signal, attempting to gracefully shutdown servers.")
-
 		healthState.Shutdown(func() {
 			// Give istio time to sync our "not ready" state
 			time.Sleep(quitSleepDuration)
