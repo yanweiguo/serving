@@ -23,6 +23,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	basecmd "github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/cmd"
@@ -41,9 +44,12 @@ import (
 	podinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/pod"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
+	pkgnet "knative.dev/pkg/network"
+	"knative.dev/pkg/websocket"
 
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
+	kle "knative.dev/pkg/leaderelection"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/metrics"
 	"knative.dev/pkg/profiling"
@@ -126,6 +132,17 @@ func main() {
 	defer flush(logger)
 	ctx = logging.WithLogger(ctx, logger)
 
+	// Set up leader election config
+	leaderElectionConfig, err := sharedmain.GetLeaderElectionConfig(ctx)
+	if err != nil {
+		logger.Fatalf("Error loading leader election configuration: %v", err)
+	}
+	leConfig := leaderElectionConfig.GetComponentConfig(component)
+	if leConfig.LeaderElect {
+		// Signal that we are executing in a context with leader election.
+		ctx = kle.WithStatefulSetLeaderElectorBuilder(ctx, kubeclient.Get(ctx), leConfig)
+	}
+
 	// statsCh is the main communication channel between the stats server and multiscaler.
 	statsCh := make(chan asmetrics.StatMessage, statsBufferLen)
 	defer close(statsCh)
@@ -171,10 +188,27 @@ func main() {
 
 	go controller.StartAll(ctx, controllers...)
 
+	ases := []*websocket.ManagedConnection{}
+	ordinal, _ := extraOrdinalFromPodName()
+	io := int(ordinal)
+	// Open a WebSocket connection to the autoscaler.
+	for i := 0; i < 3; i++ {
+		if i != io {
+			autoscalerEndpoint := fmt.Sprintf("ws://autoscaler-%d.autoscaler.%s.svc.%s:8080", i, system.Namespace(), pkgnet.GetClusterDomainName())
+			logger.Info("Connecting to Autoscaler at ", autoscalerEndpoint)
+			ases = append(ases, websocket.NewDurableSendingConnection(autoscalerEndpoint, logger))
+		}
+	}
 	go func() {
 		for sm := range statsCh {
 			collector.Record(sm.Key, sm.Stat)
-			multiScaler.Poke(sm.Key, sm.Stat)
+			if sm.Stat.IsFromActivator {
+				multiScaler.Poke(sm.Key, sm.Stat)
+			} else {
+				for _, as := range ases {
+					as.Send(sm)
+				}
+			}
 		}
 	}()
 
@@ -193,10 +227,22 @@ func main() {
 
 	statsServer.Shutdown(5 * time.Second)
 	profilingServer.Shutdown(context.Background())
+	for _, as := range ases {
+		as.Shutdown()
+	}
 	// Don't forward ErrServerClosed as that indicates we're already shutting down.
 	if err := eg.Wait(); err != nil && err != http.ErrServerClosed {
 		logger.Errorw("Error while running server", zap.Error(err))
 	}
+}
+
+func extraOrdinalFromPodName() (uint64, error) {
+	n := os.Getenv("POD_NAME")
+	if i := strings.LastIndex(n, "-"); i != -1 {
+		return strconv.ParseUint(n[i+1:], 10, 64)
+	}
+
+	return 0, fmt.Errorf("ordinal not found from name %s", n)
 }
 
 func uniScalerFactoryFunc(endpointsInformer corev1informers.EndpointsInformer,

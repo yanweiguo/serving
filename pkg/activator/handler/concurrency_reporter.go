@@ -113,6 +113,7 @@ func (cr *ConcurrencyReporter) run(stopCh <-chan struct{}, reportCh <-chan time.
 						Stat: asmetrics.Stat{
 							// Stat time is unset by design. Will be set by receiver.
 							PodName:                   cr.podName,
+							IsFromActivator:           true,
 							AverageConcurrentRequests: 1,
 							// The way the check above is written, this cannot ever be
 							// anything else but 1. The stats map key is only deleted
@@ -148,6 +149,7 @@ func (cr *ConcurrencyReporter) run(stopCh <-chan struct{}, reportCh <-chan time.
 					Stat: asmetrics.Stat{
 						// Stat time is unset by design. The receiver will set the time.
 						PodName:                   cr.podName,
+						IsFromActivator:           true,
 						AverageConcurrentRequests: adjustedConcurrency,
 						RequestCount:              adjustedCount,
 					},

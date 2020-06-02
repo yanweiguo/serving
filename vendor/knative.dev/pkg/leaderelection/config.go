@@ -19,16 +19,20 @@ package leaderelection
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
-
-	cm "knative.dev/pkg/configmap"
 )
 
 const ConfigMapNameEnv = "CONFIG_LEADERELECTION_NAME"
+
+// MaxBuckets is the maximum number of buckets to allow users to define.
+// This is a variable so that it may be customized in the binary entrypoint.
+var MaxBuckets uint32 = 10
 
 var validResourceLocks = sets.NewString("leases", "configmaps", "endpoints")
 
@@ -36,23 +40,62 @@ var validResourceLocks = sets.NewString("leases", "configmaps", "endpoints")
 func NewConfigFromMap(data map[string]string) (*Config, error) {
 	config := defaultConfig()
 
-	if err := cm.Parse(data,
-		cm.AsString("resourceLock", &config.ResourceLock),
-
-		cm.AsDuration("leaseDuration", &config.LeaseDuration),
-		cm.AsDuration("renewDeadline", &config.RenewDeadline),
-		cm.AsDuration("retryPeriod", &config.RetryPeriod),
-
-		// enabledComponents are not validated here, because they are dependent on
-		// the component. Components should provide additional validation for this
-		// field.
-		cm.AsStringSet("enabledComponents", &config.EnabledComponents),
-	); err != nil {
-		return nil, err
+	if resourceLock, ok := data["resourceLock"]; ok {
+		if !validResourceLocks.Has(resourceLock) {
+			return nil, fmt.Errorf(`resourceLock: invalid value %q: valid values are "leases","configmaps","endpoints"`, resourceLock)
+		}
+		config.ResourceLock = resourceLock
 	}
 
-	if !validResourceLocks.Has(config.ResourceLock) {
-		return nil, fmt.Errorf(`resourceLock: invalid value %q: valid values are "leases","configmaps","endpoints"`, config.ResourceLock)
+	for _, d := range []struct {
+		key string
+		val *time.Duration
+	}{{
+		"leaseDuration",
+		&config.LeaseDuration,
+	}, {
+		"renewDeadline",
+		&config.RenewDeadline,
+	}, {
+		"retryPeriod",
+		&config.RetryPeriod,
+	}} {
+		if v, ok := data[d.key]; ok {
+			dur, err := time.ParseDuration(v)
+			if err != nil {
+				return nil, fmt.Errorf("%s: invalid duration: %q", d.key, v)
+			}
+			*d.val = dur
+		}
+	}
+
+	// Process uint fields
+	for _, i := range []struct {
+		key   string
+		field *uint32
+	}{{
+		key:   "buckets",
+		field: &config.Buckets,
+	}} {
+		if raw, ok := data[i.key]; ok {
+			val, err := strconv.ParseUint(raw, 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("%s: invalid uint32: %q", i.key, raw)
+			}
+			*i.field = uint32(val)
+		}
+	}
+
+	if config.Buckets < 1 || config.Buckets > MaxBuckets {
+		return nil, fmt.Errorf("buckets: value must be between %d <= %d <= %d", 1, config.Buckets, MaxBuckets)
+	}
+
+	// enabledComponents are not validated here, because they are dependent on
+	// the component. Components should provide additional validation for this
+	// field.
+	if enabledComponents, ok := data["enabledComponents"]; ok {
+		tokens := strings.Split(enabledComponents, ",")
+		config.EnabledComponents = sets.NewString(tokens...)
 	}
 
 	return config, nil
@@ -72,6 +115,7 @@ func NewConfigFromConfigMap(configMap *corev1.ConfigMap) (*Config, error) {
 // single source repository, viz: serving or eventing.
 type Config struct {
 	ResourceLock      string
+	Buckets           uint32
 	LeaseDuration     time.Duration
 	RenewDeadline     time.Duration
 	RetryPeriod       time.Duration
@@ -83,6 +127,7 @@ func (c *Config) GetComponentConfig(name string) ComponentConfig {
 		return ComponentConfig{
 			Component:     name,
 			LeaderElect:   true,
+			Buckets:       c.Buckets,
 			ResourceLock:  c.ResourceLock,
 			LeaseDuration: c.LeaseDuration,
 			RenewDeadline: c.RenewDeadline,
@@ -96,6 +141,7 @@ func (c *Config) GetComponentConfig(name string) ComponentConfig {
 func defaultConfig() *Config {
 	return &Config{
 		ResourceLock:      "leases",
+		Buckets:           5,
 		LeaseDuration:     15 * time.Second,
 		RenewDeadline:     10 * time.Second,
 		RetryPeriod:       2 * time.Second,
@@ -107,6 +153,7 @@ func defaultConfig() *Config {
 type ComponentConfig struct {
 	Component     string
 	LeaderElect   bool
+	Buckets       uint32
 	ResourceLock  string
 	LeaseDuration time.Duration
 	RenewDeadline time.Duration

@@ -179,6 +179,9 @@ func (a *Autoscaler) Scale(ctx context.Context, now time.Time) ScaleResult {
 	// Same logic, opposite math applies here.
 	maxScaleDown := math.Floor(readyPodsCount / spec.MaxScaleDownRate)
 
+	logger.Infof("observedStableValue = %0.3f, observedPanicValue = %0.3f, TargetValue = %d",
+		observedStableValue, observedPanicValue, spec.TargetValue)
+
 	dspc := math.Ceil(observedStableValue / spec.TargetValue)
 	dppc := math.Ceil(observedPanicValue / spec.TargetValue)
 	logger.Debugf("DesiredStablePodCount = %0.3f, DesiredPanicPodCount = %0.3f, ReadyEndpointCount = %d, MaxScaleUp = %0.3f, MaxScaleDown = %0.3f",

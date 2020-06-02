@@ -26,6 +26,7 @@ import (
 
 var (
 	validComponents = sets.NewString(
+		"autoscaler",
 		"controller",
 		"hpaautoscaler",
 		"certcontroller",

@@ -60,6 +60,10 @@ var (
 		"panic_mode",
 		"1 if autoscaler is in panic mode, 0 otherwise",
 		stats.UnitDimensionless)
+	ProxyTimeInMsecM = stats.Float64(
+		"proxy_latencies",
+		"The proxy time in millisecond",
+		stats.UnitMilliseconds)
 )
 
 func init() {
@@ -71,6 +75,13 @@ func register() {
 	// a previously-registered view has the same name with a different value.
 	// View name defaults to the measure name if unspecified.
 	if err := view.Register(
+		&view.View{
+			Description: "The proxy time for autoscaling metrics in millisecond",
+			Measure:     ProxyTimeInMsecM,
+			Aggregation: view.Distribution(
+				1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 30, 40, 50, 60, 70, 80, 100, 150, 200, 250, 300, 350, 400, 450, 500, 600,
+				700, 800, 900, 1000),
+		},
 		&view.View{
 			Description: "Number of pods autoscaler wants to allocate",
 			Measure:     desiredPodCountM,

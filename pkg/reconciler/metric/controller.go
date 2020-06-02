@@ -20,7 +20,10 @@ import (
 	"context"
 
 	"go.uber.org/zap"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
+	"knative.dev/serving/pkg/apis/autoscaling"
 	"knative.dev/serving/pkg/autoscaler/metrics"
 	metricinformer "knative.dev/serving/pkg/client/injection/informers/autoscaling/v1alpha1/metric"
 	metricreconciler "knative.dev/serving/pkg/client/injection/reconciler/autoscaling/v1alpha1/metric"
@@ -29,6 +32,7 @@ import (
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/kmeta"
 	"knative.dev/pkg/logging"
+	pkgreconciler "knative.dev/pkg/reconciler"
 	servingreconciler "knative.dev/serving/pkg/reconciler"
 )
 
@@ -46,6 +50,24 @@ func NewController(
 	metricInformer := metricinformer.Get(ctx)
 
 	c := &reconciler{
+		LeaderAwareFuncs: pkgreconciler.LeaderAwareFuncs{
+			// Enqueue the key whenever we become leader.
+			PromoteFunc: func(bkt pkgreconciler.Bucket, enq func(pkgreconciler.Bucket, types.NamespacedName)) {
+				ms, err := metricInformer.Lister().List(labels.Everything())
+				if err != nil {
+					logger.Warn("Failed to list all Metrics")
+					return
+				}
+				for _, m := range ms {
+					if v, ok := m.Annotations[autoscaling.ClassAnnotationKey]; ok && v == autoscaling.KPA {
+						enq(bkt, types.NamespacedName{
+							Namespace: m.Namespace,
+							Name:      m.Name,
+						})
+					}
+				}
+			},
+		},
 		collector: collector,
 	}
 	impl := metricreconciler.NewImpl(ctx, c)

@@ -20,6 +20,8 @@ import (
 	"context"
 
 	"go.uber.org/zap"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 
 	endpointsinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/endpoints"
@@ -70,6 +72,24 @@ func NewController(
 		autoscaling.ClassAnnotationKey, autoscaling.KPA, false /*allowUnset*/)
 
 	c := &Reconciler{
+		LeaderAwareFuncs: pkgreconciler.LeaderAwareFuncs{
+			// Enqueue the key whenever we become leader.
+			PromoteFunc: func(bkt pkgreconciler.Bucket, enq func(pkgreconciler.Bucket, types.NamespacedName)) {
+				pas, err := paInformer.Lister().List(labels.Everything())
+				if err != nil {
+					logger.Warn("Failed to list all PAs")
+					return
+				}
+				for _, pa := range pas {
+					if v, ok := pa.Annotations[autoscaling.ClassAnnotationKey]; ok && v == autoscaling.KPA {
+						enq(bkt, types.NamespacedName{
+							Namespace: pa.Namespace,
+							Name:      pa.Name,
+						})
+					}
+				}
+			},
+		},
 		Base: &areconciler.Base{
 			Client:       servingclient.Get(ctx),
 			SKSLister:    sksInformer.Lister(),

@@ -27,7 +27,9 @@ import (
 
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
+	pkgmetrics "knative.dev/pkg/metrics"
 	"knative.dev/serving/pkg/autoscaler/metrics"
+	"knative.dev/serving/pkg/autoscaler/scaling"
 	"knative.dev/serving/pkg/network"
 )
 
@@ -165,7 +167,13 @@ func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 			s.logger.Error(err)
 			continue
 		}
-		sm.Stat.Time = time.Now()
+		if sm.Stat.IsFromActivator {
+			sm.Stat.Time = time.Now()
+		} else {
+			dur := time.Now().Sub(sm.Stat.Time)
+			pkgmetrics.RecordBatch(context.Background(), scaling.ProxyTimeInMsecM.M(float64(dur.Milliseconds())))
+			// s.logger.Infof("**** websock added microseconds: %v", dur.Microseconds())
+		}
 
 		s.logger.Debugf("Received stat message: %+v", sm)
 		s.statsCh <- sm

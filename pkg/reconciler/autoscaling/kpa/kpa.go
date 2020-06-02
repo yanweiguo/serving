@@ -41,6 +41,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
@@ -58,6 +59,7 @@ type podCounts struct {
 // information from Deciders.
 type Reconciler struct {
 	*areconciler.Base
+	pkgreconciler.LeaderAwareFuncs
 
 	endpointsLister corev1listers.EndpointsLister
 	podsLister      corev1listers.PodLister
@@ -67,9 +69,18 @@ type Reconciler struct {
 
 // Check that our Reconciler implements pareconciler.Interface
 var _ pareconciler.Interface = (*Reconciler)(nil)
+var _ pkgreconciler.LeaderAware = (*Reconciler)(nil)
 
 func (c *Reconciler) ReconcileKind(ctx context.Context, pa *pav1alpha1.PodAutoscaler) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
+
+	key := types.NamespacedName{Namespace: pa.Namespace, Name: pa.Name}
+	if !c.IsLeader(key) {
+		logger.Infof("Skipping kpa %q, not the leader.", key)
+		return nil
+	} else {
+		logger.Infof("Reconciling kpa %q, as the leader.", key)
+	}
 
 	// We may be reading a version of the object that was stored at an older version
 	// and may not have had all of the assumed defaults specified.  This won't result

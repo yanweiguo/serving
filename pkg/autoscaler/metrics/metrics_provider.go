@@ -18,7 +18,10 @@ package metrics
 
 import (
 	"errors"
+	"io/ioutil"
+	"log"
 	"math"
+	"net/http"
 	"time"
 
 	"github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/provider"
@@ -69,6 +72,22 @@ func (p *MetricProvider) GetMetricByName(name types.NamespacedName, info provide
 
 	var data float64
 	var err error
+
+	client := &http.Client{}
+	resp, err := client.Get("http://autoscaler-1.autoscaler.knative-serving.svc.cluster.local:8443")
+	if err != nil {
+		log.Printf("**** Get err is %v\n", err)
+	} else {
+
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("**** ReadAll err is %v\n", err)
+		} else {
+			log.Printf("**** the response is %v\n", body)
+		}
+
+		defer resp.Body.Close()
+	}
 
 	switch info {
 	case concurrencyMetricInfo:

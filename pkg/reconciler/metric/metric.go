@@ -19,26 +19,41 @@ package metric
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/serving/pkg/apis/autoscaling/v1alpha1"
 	"knative.dev/serving/pkg/autoscaler/metrics"
 
+	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
 	metricreconciler "knative.dev/serving/pkg/client/injection/reconciler/autoscaling/v1alpha1/metric"
 )
 
 // reconciler implements controller.Reconciler for Metric resources.
 type reconciler struct {
+	pkgreconciler.LeaderAwareFuncs
 	collector metrics.Collector
 }
 
 // Check that our Reconciler implements metricreconciler.Interface
 var _ metricreconciler.Interface = (*reconciler)(nil)
+var _ pkgreconciler.LeaderAware = (*reconciler)(nil)
 
 func (r *reconciler) ReconcileKind(ctx context.Context, metric *v1alpha1.Metric) pkgreconciler.Event {
+	logger := logging.FromContext(ctx)
+
+	key := types.NamespacedName{Namespace: metric.Namespace, Name: metric.Name}
+	if !r.IsLeader(key) {
+		logger.Infof("Disable scraping metric %q, not the leader.", key)
+		r.collector.CreateOrUpdate(metric, false)
+		return nil
+	} else {
+		logger.Infof("Reconciling metric %q, as the leader.", key)
+	}
+
 	metric.SetDefaults(ctx)
 	metric.Status.InitializeConditions()
 
-	if err := r.collector.CreateOrUpdate(metric); err != nil {
+	if err := r.collector.CreateOrUpdate(metric, true); err != nil {
 		switch err {
 		case metrics.ErrFailedGetEndpoints:
 			metric.Status.MarkMetricNotReady("NoEndpoints", err.Error())

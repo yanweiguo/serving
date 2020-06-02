@@ -23,7 +23,6 @@ import (
 
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/types"
-	"knative.dev/pkg/logging/logkey"
 	av1alpha1 "knative.dev/serving/pkg/apis/autoscaling/v1alpha1"
 	"knative.dev/serving/pkg/autoscaler/aggregation"
 	"knative.dev/serving/pkg/autoscaler/config"
@@ -48,6 +47,8 @@ type StatsScraperFactory func(*av1alpha1.Metric, *zap.SugaredLogger) (StatsScrap
 
 // Stat defines a single measurement at a point in time
 type Stat struct {
+	IsFromActivator bool
+
 	// The time the data point was received by autoscaler.
 	Time time.Time
 
@@ -84,7 +85,7 @@ type StatMessage struct {
 type Collector interface {
 	// CreateOrUpdate either creates a collection for the given metric or update it, should
 	// it already exist.
-	CreateOrUpdate(*av1alpha1.Metric) error
+	CreateOrUpdate(*av1alpha1.Metric, bool) error
 	// Record allows stats to be captured that came from outside the Collector.
 	Record(key types.NamespacedName, stat Stat)
 	// Delete deletes a Metric and halts collection.
@@ -112,8 +113,8 @@ type MetricCollector struct {
 	statsScraperFactory StatsScraperFactory
 	tickProvider        func(time.Duration) *time.Ticker
 
-	collectionsMutex sync.RWMutex
 	collections      map[types.NamespacedName]*collection
+	collectionsMutex sync.RWMutex
 
 	watcherMutex sync.RWMutex
 	watcher      func(types.NamespacedName)
@@ -134,11 +135,16 @@ func NewMetricCollector(statsScraperFactory StatsScraperFactory, logger *zap.Sug
 
 // CreateOrUpdate either creates a collection for the given metric or update it, should
 // it already exist.
-func (c *MetricCollector) CreateOrUpdate(metric *av1alpha1.Metric) error {
-	scraper, err := c.statsScraperFactory(metric, c.logger)
-	if err != nil {
-		return err
+func (c *MetricCollector) CreateOrUpdate(metric *av1alpha1.Metric, enableScraping bool) error {
+	var scraper StatsScraper
+	var err error
+	if enableScraping {
+		scraper, err = c.statsScraperFactory(metric, c.logger)
+		if err != nil {
+			return err
+		}
 	}
+
 	key := types.NamespacedName{Namespace: metric.Namespace, Name: metric.Name}
 
 	c.collectionsMutex.Lock()
@@ -148,11 +154,15 @@ func (c *MetricCollector) CreateOrUpdate(metric *av1alpha1.Metric) error {
 	if exists {
 		collection.updateScraper(scraper)
 		collection.updateMetric(metric)
-		return collection.lastError()
+	} else {
+		collection = newCollection(metric, scraper, c.tickProvider, c.Inform, c.logger)
+		c.collections[key] = collection
 	}
 
-	c.collections[key] = newCollection(metric, scraper, c.tickProvider, c.Inform, c.logger)
-	return nil
+	if metric.Spec.ScrapeTarget != "" && enableScraping {
+		collection.startScraping()
+	}
+	return collection.lastError()
 }
 
 // Delete deletes a Metric and halts collection.
@@ -162,7 +172,7 @@ func (c *MetricCollector) Delete(namespace, name string) error {
 
 	key := types.NamespacedName{Namespace: namespace, Name: name}
 	if collection, ok := c.collections[key]; ok {
-		collection.close()
+		collection.stopScraping()
 		delete(c.collections, key)
 	}
 	return nil
@@ -239,10 +249,10 @@ func (c *MetricCollector) StableAndPanicRPS(key types.NamespacedName, now time.T
 
 // collection represents the collection of metrics for one specific entity.
 type collection struct {
-	// mux guards access to all of the collection's state.
-	mux sync.RWMutex
+	callback func(types.NamespacedName)
 
-	metric *av1alpha1.Metric
+	metricMutex sync.RWMutex
+	metric      *av1alpha1.Metric
 
 	// Fields relevant to metric collection in general.
 	concurrencyBuckets      *aggregation.TimedFloat64Buckets
@@ -251,21 +261,25 @@ type collection struct {
 	rpsPanicBuckets         *aggregation.TimedFloat64Buckets
 
 	// Fields relevant for metric scraping specifically.
-	scraper StatsScraper
-	lastErr error
-	grp     sync.WaitGroup
-	stopCh  chan struct{}
+	scraperMutex sync.RWMutex
+	scraper      StatsScraper
+	errMutex     sync.RWMutex
+	lastErr      error
+
+	tickFactory func(time.Duration) *time.Ticker
+	grp         sync.WaitGroup
+	stopCh      chan struct{}
 }
 
 func (c *collection) updateScraper(ss StatsScraper) {
-	c.mux.Lock()
-	defer c.mux.Unlock()
+	c.scraperMutex.Lock()
+	defer c.scraperMutex.Unlock()
 	c.scraper = ss
 }
 
 func (c *collection) getScraper() StatsScraper {
-	c.mux.RLock()
-	defer c.mux.RUnlock()
+	c.scraperMutex.RLock()
+	defer c.scraperMutex.RUnlock()
 	return c.scraper
 }
 
@@ -274,6 +288,8 @@ func (c *collection) getScraper() StatsScraper {
 func newCollection(metric *av1alpha1.Metric, scraper StatsScraper, tickFactory func(time.Duration) *time.Ticker,
 	callback func(types.NamespacedName), logger *zap.SugaredLogger) *collection {
 	c := &collection{
+		callback: callback,
+
 		metric: metric,
 		concurrencyBuckets: aggregation.NewTimedFloat64Buckets(
 			metric.Spec.StableWindow, config.BucketSize),
@@ -285,37 +301,35 @@ func newCollection(metric *av1alpha1.Metric, scraper StatsScraper, tickFactory f
 			metric.Spec.PanicWindow, config.BucketSize),
 		scraper: scraper,
 
-		stopCh: make(chan struct{}),
+		tickFactory: tickFactory,
 	}
 
-	key := types.NamespacedName{Namespace: metric.Namespace, Name: metric.Name}
-	logger = logger.Named("collector").With(zap.String(logkey.Key, key.String()))
+	return c
+}
 
+// startScraping starts scraping metrics.
+// This is only run from inside a lock, it can't race with a stopScraping call.
+func (c *collection) startScraping() {
+	if c.stopCh != nil {
+		// If scraper is already running, do nothing.
+		return
+	}
+	c.stopCh = make(chan struct{})
 	c.grp.Add(1)
 	go func() {
 		defer c.grp.Done()
 
-		scrapeTicker := tickFactory(scrapeTickInterval)
+		scrapeTicker := c.tickFactory(scrapeTickInterval)
 		defer scrapeTicker.Stop()
 		for {
 			select {
 			case <-c.stopCh:
 				return
 			case <-scrapeTicker.C:
-				currentMetric := c.currentMetric()
-				if currentMetric.Spec.ScrapeTarget == "" {
-					// Don't scrape empty target service.
-					if c.updateLastError(nil) {
-						callback(key)
-					}
-					continue
-				}
-				stat, err := c.getScraper().Scrape(currentMetric.Spec.StableWindow)
-				if err != nil {
-					logger.Errorw("Failed to scrape metrics", zap.Error(err))
-				}
+				metric := c.currentMetric()
+				stat, err := c.getScraper().Scrape(metric.Spec.StableWindow)
 				if c.updateLastError(err) {
-					callback(key)
+					c.callback(types.NamespacedName{Namespace: metric.Namespace, Name: metric.Name})
 				}
 				if stat != emptyStat {
 					c.record(stat)
@@ -323,20 +337,36 @@ func newCollection(metric *av1alpha1.Metric, scraper StatsScraper, tickFactory f
 			}
 		}
 	}()
-
-	return c
 }
 
-// close stops collecting metrics, stops the scraper.
-func (c *collection) close() {
-	close(c.stopCh)
-	c.grp.Wait()
+// stopScraping stops the scraper.
+// This is only run from inside a lock, it can't race with a startScraping call.
+func (c *collection) stopScraping() {
+	if c.stopCh != nil {
+		close(c.stopCh)
+		c.grp.Wait()
+	}
+
+	c.stopCh = nil
 }
 
 // updateMetric safely updates the metric stored in the collection.
 func (c *collection) updateMetric(metric *av1alpha1.Metric) {
-	c.mux.Lock()
-	defer c.mux.Unlock()
+	c.metricMutex.Lock()
+	defer c.metricMutex.Unlock()
+
+	if c.metric.Spec.ScrapeTarget == "" && metric.Spec.ScrapeTarget != "" {
+		// Start scraping if we switch from no target to a target.
+		c.startScraping()
+	} else if c.metric.Spec.ScrapeTarget != "" && metric.Spec.ScrapeTarget == "" {
+		// Stop scraping if we switch from a target to no target.
+		c.stopScraping()
+
+		// Nilify any possible errors during scraping.
+		if c.updateLastError(nil) {
+			c.callback(types.NamespacedName{Namespace: metric.Namespace, Name: metric.Name})
+		}
+	}
 
 	c.metric = metric
 	c.concurrencyBuckets.ResizeWindow(metric.Spec.StableWindow)
@@ -347,8 +377,8 @@ func (c *collection) updateMetric(metric *av1alpha1.Metric) {
 
 // currentMetric safely returns the current metric stored in the collection.
 func (c *collection) currentMetric() *av1alpha1.Metric {
-	c.mux.RLock()
-	defer c.mux.RUnlock()
+	c.metricMutex.RLock()
+	defer c.metricMutex.RUnlock()
 
 	return c.metric
 }
@@ -356,8 +386,8 @@ func (c *collection) currentMetric() *av1alpha1.Metric {
 // updateLastError updates the last error returned from the scraper
 // and returns true if the error or error state changed.
 func (c *collection) updateLastError(err error) bool {
-	c.mux.Lock()
-	defer c.mux.Unlock()
+	c.errMutex.Lock()
+	defer c.errMutex.Unlock()
 
 	if c.lastErr == err {
 		return false
@@ -367,8 +397,8 @@ func (c *collection) updateLastError(err error) bool {
 }
 
 func (c *collection) lastError() error {
-	c.mux.RLock()
-	defer c.mux.RUnlock()
+	c.errMutex.RLock()
+	defer c.errMutex.RUnlock()
 
 	return c.lastErr
 }

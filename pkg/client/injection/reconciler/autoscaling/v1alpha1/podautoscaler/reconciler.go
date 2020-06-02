@@ -91,6 +91,7 @@ type reconcilerImpl struct {
 
 // Check that our Reconciler implements controller.Reconciler
 var _ controller.Reconciler = (*reconcilerImpl)(nil)
+var _ reconciler.LeaderAware = (*reconcilerImpl)(nil)
 
 func NewReconciler(ctx context.Context, logger *zap.SugaredLogger, client versioned.Interface, lister autoscalingv1alpha1.PodAutoscalerLister, recorder record.EventRecorder, r Interface, classValue string, options ...controller.Options) controller.Reconciler {
 	// Check the options function input. It should be 0 or 1.
@@ -224,6 +225,26 @@ func (r *reconcilerImpl) Reconcile(ctx context.Context, key string) error {
 	}
 
 	return nil
+}
+
+func (r *reconcilerImpl) IsLeader(nn types.NamespacedName) bool {
+	if la, ok := r.reconciler.(reconciler.LeaderAware); ok {
+		return la.IsLeader(nn)
+	}
+
+	return false
+}
+
+func (r *reconcilerImpl) Promote(b reconciler.Bucket, enq func(reconciler.Bucket, types.NamespacedName)) {
+	if la, ok := r.reconciler.(reconciler.LeaderAware); ok {
+		la.Promote(b, enq)
+	}
+}
+
+func (r *reconcilerImpl) Demote(b reconciler.Bucket) {
+	if la, ok := r.reconciler.(reconciler.LeaderAware); ok {
+		la.Demote(b)
+	}
 }
 
 func (r *reconcilerImpl) updateStatus(existing *v1alpha1.PodAutoscaler, desired *v1alpha1.PodAutoscaler) error {

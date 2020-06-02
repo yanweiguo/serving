@@ -188,6 +188,8 @@ type Finalizer interface {
 
 // reconcilerImpl implements controller.Reconciler for {{.type|raw}} resources.
 type reconcilerImpl struct {
+	pkgreconciler.LeaderAwareFuncs
+
 	// Client is used to write back status updates.
 	Client {{.clientsetInterface|raw}}
 
@@ -216,6 +218,7 @@ type reconcilerImpl struct {
 
 // Check that our Reconciler implements controller.Reconciler
 var _ controller.Reconciler = (*reconcilerImpl)(nil)
+var _ pkgreconciler.LeaderAware = (*reconcilerImpl)(nil)
 
 `
 

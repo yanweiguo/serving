@@ -79,21 +79,27 @@ var (
 	kubeconfig = flag.String("kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
 )
 
-func statReporter(statSink *websocket.ManagedConnection, stopCh <-chan struct{},
+func statReporter(statSinks []*websocket.ManagedConnection, stopCh <-chan struct{},
 	statChan <-chan []asmetrics.StatMessage, logger *zap.SugaredLogger) {
 	for {
 		select {
 		case sm := <-statChan:
 			go func() {
 				for _, msg := range sm {
-					if err := statSink.Send(msg); err != nil {
-						logger.Errorw("Error while sending stat", zap.Error(err))
+					for _, statSink := range statSinks {
+						if err := statSink.Send(msg); err != nil {
+							logger.Errorw("Error while sending stat", zap.Error(err))
+						}
 					}
+
 				}
 			}()
 		case <-stopCh:
 			// It's a sending connection, so no drainage required.
-			statSink.Shutdown()
+			for _, statSink := range statSinks {
+				statSink.Shutdown()
+			}
+
 			return
 		}
 	}
@@ -190,11 +196,13 @@ func main() {
 	configStore := activatorconfig.NewStore(logger, tracerUpdater)
 	configStore.WatchConfigs(configMapWatcher)
 
-	// Open a WebSocket connection to the autoscaler.
-	autoscalerEndpoint := fmt.Sprintf("ws://%s.%s.svc.%s%s", "autoscaler", system.Namespace(), pkgnet.GetClusterDomainName(), autoscalerPort)
-	logger.Info("Connecting to Autoscaler at ", autoscalerEndpoint)
-	statSink := websocket.NewDurableSendingConnection(autoscalerEndpoint, logger)
-	go statReporter(statSink, ctx.Done(), statCh, logger)
+	ases := []*websocket.ManagedConnection{}
+	for i := 0; i < 3; i++ {
+		autoscalerEndpoint := fmt.Sprintf("ws://autoscaler-%d.autoscaler.%s.svc.%s:8080", i, system.Namespace(), pkgnet.GetClusterDomainName())
+		logger.Info("Connecting to Autoscaler at ", autoscalerEndpoint)
+		ases = append(ases, websocket.NewDurableSendingConnection(autoscalerEndpoint, logger))
+	}
+	go statReporter(ases, ctx.Done(), statCh, logger)
 
 	// Create and run our concurrency reporter
 	cr := activatorhandler.NewConcurrencyReporter(ctx, env.PodName, reqCh, statCh)
@@ -224,7 +232,7 @@ func main() {
 
 	// Set up our health check based on the health of stat sink and environmental factors.
 	sigCtx, sigCancel := context.WithCancel(context.Background())
-	hc := newHealthCheck(sigCtx, logger, statSink)
+	hc := newHealthCheck(sigCtx, logger)
 	ah = &activatorhandler.HealthHandler{HealthCheck: hc, NextHandler: ah, Logger: logger}
 
 	profilingHandler := profiling.NewHandler(logger, false)
@@ -282,7 +290,7 @@ func main() {
 	logger.Info("Servers shutdown.")
 }
 
-func newHealthCheck(sigCtx context.Context, logger *zap.SugaredLogger, statSink *websocket.ManagedConnection) func() error {
+func newHealthCheck(sigCtx context.Context, logger *zap.SugaredLogger) func() error {
 	once := sync.Once{}
 	return func() error {
 		select {
@@ -294,7 +302,7 @@ func newHealthCheck(sigCtx context.Context, logger *zap.SugaredLogger, statSink 
 			return errors.New("received SIGTERM from kubelet")
 		default:
 			logger.Debug("No signal yet.")
-			return statSink.Status()
+			return nil
 		}
 	}
 }
