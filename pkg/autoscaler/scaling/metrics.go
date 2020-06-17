@@ -60,9 +60,13 @@ var (
 		"panic_mode",
 		"1 if autoscaler is in panic mode, 0 otherwise",
 		stats.UnitDimensionless)
-	ProxyTimeInMsecM = stats.Float64(
-		"proxy_latencies",
-		"The proxy time in millisecond",
+	A2ALatencyInMsecM = stats.Float64(
+		"a2a_latencies",
+		"The latency from activator to first autoscaler in millisecond",
+		stats.UnitMilliseconds)
+	A2AProxyLatencyInMsecM = stats.Float64(
+		"a2a_proxy_latencies",
+		"The latency from activator to leading autoscaler in millisecond",
 		stats.UnitMilliseconds)
 )
 
@@ -76,8 +80,15 @@ func register() {
 	// View name defaults to the measure name if unspecified.
 	if err := view.Register(
 		&view.View{
-			Description: "The proxy time for autoscaling metrics in millisecond",
-			Measure:     ProxyTimeInMsecM,
+			Description: "The latency from activator to first autoscaler in millisecond",
+			Measure:     A2ALatencyInMsecM,
+			Aggregation: view.Distribution(
+				1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 30, 40, 50, 60, 70, 80, 100, 150, 200, 250, 300, 350, 400, 450, 500, 600,
+				700, 800, 900, 1000),
+		},
+		&view.View{
+			Description: "The latency from activator to leading autoscaler in millisecond",
+			Measure:     A2AProxyLatencyInMsecM,
 			Aggregation: view.Distribution(
 				1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 30, 40, 50, 60, 70, 80, 100, 150, 200, 250, 300, 350, 400, 450, 500, 600,
 				700, 800, 900, 1000),

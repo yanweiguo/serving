@@ -167,12 +167,12 @@ func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 			s.logger.Error(err)
 			continue
 		}
+
+		dur := time.Now().Sub(sm.Stat.Time)
 		if sm.Stat.IsFromActivator {
-			sm.Stat.Time = time.Now()
+			pkgmetrics.RecordBatch(context.Background(), scaling.A2ALatencyInMsecM.M(float64(dur.Milliseconds())))
 		} else {
-			dur := time.Now().Sub(sm.Stat.Time)
-			pkgmetrics.RecordBatch(context.Background(), scaling.ProxyTimeInMsecM.M(float64(dur.Milliseconds())))
-			// s.logger.Infof("**** websock added microseconds: %v", dur.Microseconds())
+			pkgmetrics.RecordBatch(context.Background(), scaling.A2AProxyLatencyInMsecM.M(float64(dur.Milliseconds())))
 		}
 
 		s.logger.Debugf("Received stat message: %+v", sm)

@@ -202,12 +202,10 @@ func main() {
 	go func() {
 		for sm := range statsCh {
 			collector.Record(sm.Key, sm.Stat)
-			if sm.Stat.IsFromActivator {
-				multiScaler.Poke(sm.Key, sm.Stat)
-			} else {
-				for _, as := range ases {
-					as.Send(sm)
-				}
+			multiScaler.Poke(sm.Key, sm.Stat)
+			sm.Stat.IsFromActivator = false
+			for _, as := range ases {
+				as.Send(sm)
 			}
 		}
 	}()

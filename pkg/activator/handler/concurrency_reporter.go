@@ -120,6 +120,7 @@ func (cr *ConcurrencyReporter) run(stopCh <-chan struct{}, reportCh <-chan time.
 							// after a reporting period, so we see this code path at most
 							// once per period.
 							RequestCount: 1,
+							Time: time.Now(),
 						},
 					}}
 				}
@@ -152,6 +153,7 @@ func (cr *ConcurrencyReporter) run(stopCh <-chan struct{}, reportCh <-chan time.
 						IsFromActivator:           true,
 						AverageConcurrentRequests: adjustedConcurrency,
 						RequestCount:              adjustedCount,
+						Time: time.Now(),
 					},
 				})
 				cr.reportToMetricsBackend(key, report.AverageConcurrency)
