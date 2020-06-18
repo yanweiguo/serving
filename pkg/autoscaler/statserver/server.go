@@ -171,6 +171,7 @@ func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 		dur := time.Now().Sub(sm.Stat.Time)
 		if sm.Stat.IsFromActivator {
 			pkgmetrics.RecordBatch(context.Background(), scaling.A2ALatencyInMsecM.M(float64(dur.Milliseconds())))
+			sm.Stat.IsFromActivator = false
 		} else {
 			pkgmetrics.RecordBatch(context.Background(), scaling.A2AProxyLatencyInMsecM.M(float64(dur.Milliseconds())))
 		}

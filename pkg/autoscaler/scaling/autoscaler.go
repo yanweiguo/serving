@@ -179,7 +179,7 @@ func (a *Autoscaler) Scale(ctx context.Context, now time.Time) ScaleResult {
 	// Same logic, opposite math applies here.
 	maxScaleDown := math.Floor(readyPodsCount / spec.MaxScaleDownRate)
 
-	logger.Infof("observedStableValue = %0.3f, observedPanicValue = %0.3f, TargetValue = %d",
+	logger.Infof("observedStableValue = %0.3f, observedPanicValue = %0.3f, TargetValue = %0.3f",
 		observedStableValue, observedPanicValue, spec.TargetValue)
 
 	dspc := math.Ceil(observedStableValue / spec.TargetValue)

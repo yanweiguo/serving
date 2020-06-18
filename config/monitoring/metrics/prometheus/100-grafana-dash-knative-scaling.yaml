@@ -1123,32 +1123,46 @@ data:
                "steppedLine": false,
                "targets": [
                {
-                  "expr": "label_replace(histogram_quantile(0.50, sum(rate(autoscaler_proxy_latencies_bucket{namespace_name=\"$namespace\", configuration_name=~\"$configuration\",revision_name=~\"$revision\"}[1m])) by (revision_name, le)), \"revision_name\", \"$2\", \"revision_name\", \"$configuration(-+)(.*)\")",
+                  "expr": "label_replace(histogram_quantile(0.50, sum(rate(autoscaler_a2a_latencies_bucket{namespace_name=\"$namespace\", configuration_name=~\"$configuration\",revision_name=~\"$revision\"}[1m])) by (revision_name, le)), \"revision_name\", \"$2\", \"revision_name\", \"$configuration(-+)(.*)\")",
                   "format": "time_series",
                   "intervalFactor": 1,
                   "legendFormat": "{{ revision_name }} (p50)",
                   "refId": "A"
                },
                {
-                  "expr": "label_replace(histogram_quantile(0.90, sum(rate(autoscaler_proxy_latencies_bucket{namespace_name=\"$namespace\", configuration_name=~\"$configuration\",revision_name=~\"$revision\"}[1m])) by (revision_name, le)), \"revision_name\", \"$2\", \"revision_name\", \"$configuration(-+)(.*)\")",
-                  "format": "time_series",
-                  "intervalFactor": 1,
-                  "legendFormat": "{{ revision_name }} (p90)",
-                  "refId": "B"
-               },
-               {
-                  "expr": "label_replace(histogram_quantile(0.95, sum(rate(autoscaler_proxy_latencies_bucket{namespace_name=\"$namespace\", configuration_name=~\"$configuration\",revision_name=~\"$revision\"}[1m])) by (revision_name, le)), \"revision_name\", \"$2\", \"revision_name\", \"$configuration(-+)(.*)\")",
+                  "expr": "label_replace(histogram_quantile(0.90, sum(rate(autoscaler_a2a_latencies_bucket{namespace_name=\"$namespace\", configuration_name=~\"$configuration\",revision_name=~\"$revision\"}[1m])) by (revision_name, le)), \"revision_name\", \"$2\", \"revision_name\", \"$configuration(-+)(.*)\")",
                   "format": "time_series",
                   "intervalFactor": 1,
                   "legendFormat": "{{ revision_name }} (p95)",
-                  "refId": "C"
+                  "refId": "B"
                },
                {
-                  "expr": "label_replace(histogram_quantile(0.99, sum(rate(autoscaler_proxy_latencies_bucket{namespace_name=\"$namespace\", configuration_name=~\"$configuration\",revision_name=~\"$revision\"}[1m])) by (revision_name, le)), \"revision_name\", \"$2\", \"revision_name\", \"$configuration(-+)(.*)\")",
+                  "expr": "label_replace(histogram_quantile(0.95, sum(rate(autoscaler_a2a_latencies_bucket{namespace_name=\"$namespace\", configuration_name=~\"$configuration\",revision_name=~\"$revision\"}[1m])) by (revision_name, le)), \"revision_name\", \"$2\", \"revision_name\", \"$configuration(-+)(.*)\")",
                   "format": "time_series",
                   "intervalFactor": 1,
                   "legendFormat": "{{ revision_name }} (p99)",
+                  "refId": "C"
+               },
+               {
+                  "expr": "label_replace(histogram_quantile(0.99, sum(rate(autoscaler_a2a_proxy_latencies_bucket{namespace_name=\"$namespace\", configuration_name=~\"$configuration\",revision_name=~\"$revision\"}[1m])) by (revision_name, le)), \"revision_name\", \"$2\", \"revision_name\", \"$configuration(-+)(.*)\")",
+                  "format": "time_series",
+                  "intervalFactor": 1,
+                  "legendFormat": "{{ revision_name }} (p50)",
                   "refId": "D"
+               },
+               {
+                  "expr": "label_replace(histogram_quantile(0.99, sum(rate(autoscaler_a2a_proxy_latencies_bucket{namespace_name=\"$namespace\", configuration_name=~\"$configuration\",revision_name=~\"$revision\"}[1m])) by (revision_name, le)), \"revision_name\", \"$2\", \"revision_name\", \"$configuration(-+)(.*)\")",
+                  "format": "time_series",
+                  "intervalFactor": 1,
+                  "legendFormat": "{{ revision_name }} (p95)",
+                  "refId": "E"
+               },
+               {
+                  "expr": "label_replace(histogram_quantile(0.99, sum(rate(autoscaler_a2a_proxy_latencies_bucket{namespace_name=\"$namespace\", configuration_name=~\"$configuration\",revision_name=~\"$revision\"}[1m])) by (revision_name, le)), \"revision_name\", \"$2\", \"revision_name\", \"$configuration(-+)(.*)\")",
+                  "format": "time_series",
+                  "intervalFactor": 1,
+                  "legendFormat": "{{ revision_name }} (p99)",
+                  "refId": "F"
                }
                ],
                "thresholds": [],
