@@ -85,6 +85,7 @@ func register() {
 			Aggregation: view.Distribution(
 				1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 30, 40, 50, 60, 70, 80, 100, 150, 200, 250, 300, 350, 400, 450, 500, 600,
 				700, 800, 900, 1000),
+			TagKeys: metrics.CommonRevisionKeys,
 		},
 		&view.View{
 			Description: "The latency from activator to leading autoscaler in millisecond",
@@ -92,6 +93,7 @@ func register() {
 			Aggregation: view.Distribution(
 				1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 30, 40, 50, 60, 70, 80, 100, 150, 200, 250, 300, 350, 400, 450, 500, 600,
 				700, 800, 900, 1000),
+			TagKeys: metrics.CommonRevisionKeys,
 		},
 		&view.View{
 			Description: "Number of pods autoscaler wants to allocate",

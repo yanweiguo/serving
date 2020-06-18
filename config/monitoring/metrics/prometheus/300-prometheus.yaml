@@ -283,11 +283,11 @@ spec:
             scheme: HTTP
           failureThreshold: 10
           timeoutSeconds: 3
-        resources:
-          limits:
-            memory: 1000Mi
-          requests:
-            memory: 400Mi
+        # resources:
+        #   limits:
+        #     memory: 1000Mi
+        #   requests:
+        #     memory: 400Mi
         terminationMessagePath: /dev/termination-log
         volumeMounts:
         - name: prometheus-config-volume
