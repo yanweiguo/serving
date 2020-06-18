@@ -48,6 +48,8 @@ type StatsScraperFactory func(*av1alpha1.Metric, *zap.SugaredLogger) (StatsScrap
 
 // Stat defines a single measurement at a point in time
 type Stat struct {
+	Proxied bool
+
 	// The time the data point was received by autoscaler.
 	Time time.Time
 

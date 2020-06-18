@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	basecmd "github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/cmd"
@@ -41,11 +42,14 @@ import (
 	podinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/pod"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
+	pkgnet "knative.dev/pkg/network"
+	"knative.dev/pkg/websocket"
 
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/metrics"
+	pkgmetrics "knative.dev/pkg/metrics"
 	"knative.dev/pkg/profiling"
 	"knative.dev/pkg/signals"
 	"knative.dev/pkg/system"
@@ -53,6 +57,7 @@ import (
 	av1alpha1 "knative.dev/serving/pkg/apis/autoscaling/v1alpha1"
 	"knative.dev/serving/pkg/apis/serving"
 	asmetrics "knative.dev/serving/pkg/autoscaler/metrics"
+	"knative.dev/serving/pkg/autoscaler/ordinal"
 	"knative.dev/serving/pkg/autoscaler/scaling"
 	"knative.dev/serving/pkg/autoscaler/statserver"
 	smetrics "knative.dev/serving/pkg/metrics"
@@ -171,10 +176,36 @@ func main() {
 
 	go controller.StartAll(ctx, controllers...)
 
+	autoscalerEndpoint := fmt.Sprintf("ws://autoscaler-%d.autoscaler.%s.svc.%s:8080", ordinal.Leader, system.Namespace(), pkgnet.GetClusterDomainName())
+	logger.Info("Connecting to Autoscaler at ", autoscalerEndpoint)
+	statSink := websocket.NewDurableSendingConnection(autoscalerEndpoint, logger)
+
 	go func() {
 		for sm := range statsCh {
-			collector.Record(sm.Key, sm.Stat)
-			multiScaler.Poke(sm.Key, sm.Stat)
+			now := time.Now()
+			dur := now.Sub(sm.Stat.Time)
+
+			var svc, cfg string
+			if i := strings.LastIndex(sm.Key.Name, "-"); i != -1 {
+				svc = sm.Key.Name[:i-1]
+				cfg = sm.Key.Name[:i-1]
+			}
+
+			ctx, _ := smetrics.RevisionContext(sm.Key.Namespace, svc, cfg, sm.Key.Name)
+			if sm.Stat.Proxied {
+				pkgmetrics.RecordBatch(ctx, scaling.A2AProxyLatencyInMsecM.M(float64(dur.Milliseconds())))
+			} else {
+				pkgmetrics.RecordBatch(ctx, scaling.A2ALatencyInMsecM.M(float64(dur.Milliseconds())))
+			}
+
+			if ordinal.IsLeader {
+				sm.Stat.Time = now
+				collector.Record(sm.Key, sm.Stat)
+				multiScaler.Poke(sm.Key, sm.Stat)
+			} else {
+				sm.Stat.Proxied = true
+				statSink.Send(sm)
+			}
 		}
 	}()
 
