@@ -49,7 +49,7 @@ spec:
                 - "-parallel=1"
               env:
                 - name:  KO_DOCKER_REPO
-                  value: gcr.io/knative-performance
+                  value: gcr.io/yanweiguo-test
               resources:
                 requests:
                   cpu: 1000m
@@ -96,7 +96,7 @@ spec:
                 - "-parallel=5"
               env:
                 - name:  KO_DOCKER_REPO
-                  value: gcr.io/knative-performance
+                  value: gcr.io/yanweiguo-test
               resources:
                 requests:
                   cpu: 1000m
@@ -143,7 +143,7 @@ spec:
                 - "-parallel=25"
               env:
                 - name:  KO_DOCKER_REPO
-                  value: gcr.io/knative-performance
+                  value: gcr.io/yanweiguo-test
               resources:
                 requests:
                   cpu: 1000m
