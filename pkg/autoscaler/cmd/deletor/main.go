@@ -21,6 +21,7 @@ import (
 	"log"
 
 	"go.uber.org/zap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"knative.dev/pkg/logging"
@@ -36,12 +37,12 @@ func main() {
 		panic(err)
 	}
 
-	as, err := kubeClient.AppsV1().Deployments(system.Namespace()).Get("autoscaler")
+	as, err := kubeClient.AppsV1().Deployments(system.Namespace()).Get("autoscaler", metav1.GetOptions{})
 	if err != nil {
 		logger.Error("Failed to find deployment autoscaler")
 	}
 
-	logger.Infof("%v", as.Annotations)
+	logger.Infof("%v", as.Labels)
 	logger.Info("Migration complete")
 }
 
