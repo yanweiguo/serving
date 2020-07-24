@@ -36,8 +36,11 @@ require (
 	k8s.io/api v0.18.1
 	k8s.io/apimachinery v0.18.5
 	k8s.io/client-go v11.0.1-0.20190805182717-6502b5e7b1b5+incompatible
+	k8s.io/cloud-provider v0.17.4
 	k8s.io/code-generator v0.18.0
+	k8s.io/klog v1.0.0
 	k8s.io/kube-openapi v0.0.0-20200410145947-bcb3869e6f29
+	k8s.io/legacy-cloud-providers v0.17.4
 	knative.dev/caching v0.0.0-20200714175930-11f3ba7a4c58
 	knative.dev/networking v0.0.0-20200714175930-aa7079ce334c
 	knative.dev/pkg v0.0.0-20200715082932-e863db03445f
