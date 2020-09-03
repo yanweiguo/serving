@@ -26,13 +26,6 @@ import (
 
 const prefix = "autoscaler-bucket"
 
-// Ownership provides the ownership between an Autoscaler bucket and an Autoscaler pod.
-type Ownership interface {
-	// IsOwner returns true if the pod where this function is called is the owner
-	// of the given bucket.
-	IsOwner(bktName string) bool
-}
-
 // NewBucketSet creates a hash.BucketSet for Autoscaler buckets with the given
 // bucket count.
 func NewBucketSet(count uint32) *hash.BucketSet {

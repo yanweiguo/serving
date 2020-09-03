@@ -191,7 +191,7 @@ func main() {
 	defer f.Cancel()
 
 	// Set up a statserver.
-	statsServer := statserver.New(statsServerAddr, statsCh, logger, f)
+	statsServer := statserver.New(statsServerAddr, statsCh, logger, f.IsBucketOwner)
 
 	go controller.StartAll(ctx, controllers...)
 

@@ -38,26 +38,26 @@ const closeCodeTryAgain = 1013
 
 // Server receives autoscaler statistics over WebSocket and sends them to a channel.
 type Server struct {
-	addr        string
-	wsSrv       http.Server
-	servingCh   chan struct{}
-	stopCh      chan struct{}
-	statsCh     chan<- metrics.StatMessage
-	openClients sync.WaitGroup
-	ownership   bucket.Ownership
-	logger      *zap.SugaredLogger
+	addr          string
+	wsSrv         http.Server
+	servingCh     chan struct{}
+	stopCh        chan struct{}
+	statsCh       chan<- metrics.StatMessage
+	openClients   sync.WaitGroup
+	isBucketOwner func(bktName string) bool
+	logger        *zap.SugaredLogger
 }
 
 // New creates a Server which will receive autoscaler statistics and forward them to statsCh until Shutdown is called.
-func New(statsServerAddr string, statsCh chan<- metrics.StatMessage, logger *zap.SugaredLogger, ownership bucket.Ownership) *Server {
+func New(statsServerAddr string, statsCh chan<- metrics.StatMessage, logger *zap.SugaredLogger, f func(bktName string) bool) *Server {
 	svr := Server{
-		addr:        statsServerAddr,
-		servingCh:   make(chan struct{}),
-		stopCh:      make(chan struct{}),
-		statsCh:     statsCh,
-		openClients: sync.WaitGroup{},
-		ownership:   ownership,
-		logger:      logger.Named("stats-websocket-server").With("address", statsServerAddr),
+		addr:          statsServerAddr,
+		servingCh:     make(chan struct{}),
+		stopCh:        make(chan struct{}),
+		statsCh:       statsCh,
+		openClients:   sync.WaitGroup{},
+		isBucketOwner: f,
+		logger:        logger.Named("stats-websocket-server").With("address", statsServerAddr),
 	}
 
 	mux := http.NewServeMux()
@@ -126,9 +126,9 @@ func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.ownership != nil && bucket.IsBucketHost(r.Host) {
+	if s.isBucketOwner != nil && bucket.IsBucketHost(r.Host) {
 		bkt := strings.Split(r.Host, ".")[0]
-		if !s.ownership.IsOwner(bkt) {
+		if !s.isBucketOwner(bkt) {
 			s.logger.Warn("Close the connection because not the owner of the bucket ", bkt)
 			err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(closeCodeTryAgain, "NotOwner"))
 			if err != nil {

@@ -354,7 +354,7 @@ func (f *Forwarder) Cancel() {
 }
 
 // IsOwner implements Ownership.
-func (f *Forwarder) IsOwner(name string) bool {
+func (f *Forwarder) IsBucketOwner(name string) bool {
 	p := f.getProcessor(name)
 	if p == nil {
 		return false
