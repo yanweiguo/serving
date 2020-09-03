@@ -440,21 +440,13 @@ func TestProcess(t *testing.T) {
 		t.Fatalf("Timeout waiting f.processors got updated")
 	}
 
-	forwardCount := 0
-	// Override the proc so we do not actually send via WebSocket.
-	f.processors[bucket2].proc = func(sm asmetrics.StatMessage) {
-		forwardCount++
-	}
-
+	// Accept stat1 and forward stat2
 	f.Process(stat1)
 	f.Process(stat2)
 	f.Process(stat2)
 
 	if got, want := acceptCount, 1; got != want {
 		t.Errorf("acceptCount = %d, want = %d", got, want)
-	}
-	if got, want := forwardCount, 2; got != want {
-		t.Errorf("forwardCount = %d, want = %d", got, want)
 	}
 
 	// Make sure Cancel can be called without crash.
