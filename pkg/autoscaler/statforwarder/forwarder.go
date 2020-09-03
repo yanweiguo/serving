@@ -40,6 +40,7 @@ import (
 	endpointsinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/endpoints"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/hash"
+	"knative.dev/pkg/network"
 	"knative.dev/pkg/system"
 	"knative.dev/pkg/websocket"
 	asmetrics "knative.dev/serving/pkg/autoscaler/metrics"
@@ -292,7 +293,7 @@ func (f *Forwarder) createProcessor(bkt, holder string) *bucketProcessor {
 			holder: holder,
 			proc: func(sm asmetrics.StatMessage) {
 				l := f.logger.With(zap.String("revision", sm.Key.String()))
-				l.Debug("Accept stat as owner of bucket ", bkt)
+				l.Info("## Accept stat as owner of bucket ", bkt)
 				if f.accept != nil {
 					f.accept(sm)
 				}
@@ -302,15 +303,16 @@ func (f *Forwarder) createProcessor(bkt, holder string) *bucketProcessor {
 
 	// TODO(9235): Currently we use IP directly. This won't work if there
 	// is mesh. Need to fall back to connection via Service.
-	dns := fmt.Sprintf("ws://%s:%d", holder, autoscalerPort)
-	f.logger.Info("Connecting to Autoscaler bucket at ", dns)
+	// dns := fmt.Sprintf("ws://%s:%d", holder, autoscalerPort)
+	dns := fmt.Sprintf("ws://%s.%s.svc.%s:%d", bkt, system.Namespace(), network.GetClusterDomainName(), autoscalerPort)
+	f.logger.Info("## Connecting to Autoscaler bucket at ", dns)
 	c := websocket.NewDurableSendingConnection(dns, f.logger)
 	return &bucketProcessor{
 		holder: holder,
 		conn:   c,
 		proc: func(sm asmetrics.StatMessage) {
 			l := f.logger.With(zap.String("revision", sm.Key.String()))
-			l.Debugf("Forward stat of bucket %s to the holder %s", bkt, holder)
+			l.Infof("## Forward stat of bucket %s to the holder %s", bkt, holder)
 			wsms := asmetrics.ToWireStatMessages([]asmetrics.StatMessage{sm})
 			b, err := wsms.Marshal()
 			if err != nil {
@@ -349,4 +351,14 @@ func (f *Forwarder) Cancel() {
 			p.conn.Shutdown()
 		}
 	}
+}
+
+// IsOwner implements Ownership.
+func (f *Forwarder) IsOwner(name string) bool {
+	p := f.getProcessor(name)
+	if p == nil {
+		return false
+	}
+
+	return p.holder == f.selfIP
 }

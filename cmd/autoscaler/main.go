@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"go.opencensus.io/stats/view"
@@ -37,6 +38,7 @@ import (
 	podinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/pod"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
+	"knative.dev/pkg/leaderelection"
 
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
@@ -48,8 +50,10 @@ import (
 	"knative.dev/pkg/version"
 	av1alpha1 "knative.dev/serving/pkg/apis/autoscaling/v1alpha1"
 	"knative.dev/serving/pkg/apis/serving"
+	"knative.dev/serving/pkg/autoscaler/bucket"
 	asmetrics "knative.dev/serving/pkg/autoscaler/metrics"
 	"knative.dev/serving/pkg/autoscaler/scaling"
+	"knative.dev/serving/pkg/autoscaler/statforwarder"
 	"knative.dev/serving/pkg/autoscaler/statserver"
 	smetrics "knative.dev/serving/pkg/metrics"
 	"knative.dev/serving/pkg/reconciler/autoscaling/kpa"
@@ -123,7 +127,8 @@ func main() {
 
 	profilingHandler := profiling.NewHandler(logger, false)
 
-	cmw := configmap.NewInformedWatcher(kubeclient.Get(ctx), system.Namespace())
+	ns := system.Namespace()
+	cmw := configmap.NewInformedWatcher(kubeClient, ns)
 	// Watch the logging config map and dynamically update logging levels.
 	cmw.Watch(logging.ConfigMapName(), logging.UpdateLevelFromConfigMap(logger, atomicLevel, component))
 	// Watch the observability config map
@@ -146,9 +151,6 @@ func main() {
 		metric.NewController(ctx, cmw, collector),
 	}
 
-	// Set up a statserver.
-	statsServer := statserver.New(statsServerAddr, statsCh, logger)
-
 	// Start watching the configs.
 	if err := cmw.Start(ctx.Done()); err != nil {
 		logger.Fatalw("Failed to start watching configs", zap.Error(err))
@@ -159,12 +161,43 @@ func main() {
 		logger.Fatalw("Failed to start informers", zap.Error(err))
 	}
 
+	// accept is the func to call when this pod owns the given StatMessage.
+	accept := func(sm asmetrics.StatMessage) {
+		collector.Record(sm.Key, time.Now(), sm.Stat)
+		multiScaler.Poke(sm.Key, sm.Stat)
+	}
+
+	selfIP := os.Getenv("POD_IP")
+	if selfIP == "" {
+		logger.Fatalf("POD_IP environment variable not set.")
+	}
+
+	// Set up leader election config
+	leaderElectionConfig, err := sharedmain.GetLeaderElectionConfig(ctx)
+	if err != nil {
+		logger.Fatalf("Error loading leader election configuration: %v", err)
+	}
+
+	cc := leaderElectionConfig.GetComponentConfig(component)
+	cc.LeaseName = func(i uint32) string {
+		return bucket.BucketName(i, cc.Buckets)
+	}
+	cc.Identity = selfIP
+	cc.Buckets = 10
+	ctx = leaderelection.WithDynamicLeaderElectorBuilder(ctx, kubeClient, cc)
+
+	f := statforwarder.New(ctx, logger, kubeClient, selfIP, bucket.NewBucketSet(cc.Buckets), accept)
+	accept = f.Process
+	defer f.Cancel()
+
+	// Set up a statserver.
+	statsServer := statserver.New(statsServerAddr, statsCh, logger, f)
+
 	go controller.StartAll(ctx, controllers...)
 
 	go func() {
 		for sm := range statsCh {
-			collector.Record(sm.Key, time.Now(), sm.Stat)
-			multiScaler.Poke(sm.Key, sm.Stat)
+			f.Process(sm)
 		}
 	}()
 

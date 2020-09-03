@@ -333,7 +333,7 @@ type testServer struct {
 
 func newTestServer(statsCh chan<- metrics.StatMessage) *testServer {
 	return &testServer{
-		Server:       New(testAddress, statsCh, zap.NewNop().Sugar()),
+		Server:       New(testAddress, statsCh, zap.NewNop().Sugar(), nil),
 		listenAddrCh: make(chan string, 1),
 	}
 }

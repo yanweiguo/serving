@@ -38,12 +38,14 @@ type Ownership interface {
 func NewBucketSet(count uint32) *hash.BucketSet {
 	names := make(sets.String, count)
 	for i := uint32(0); i < count; i++ {
-		names.Insert(bucketName(i, count))
+		names.Insert(BucketName(i, count))
 	}
 	return hash.NewBucketSet(names)
 }
 
-func bucketName(ordinal, count uint32) string {
+// BucketName returns the name of an Autoscaler bucket with given ordinal and total
+// bucket count.
+func BucketName(ordinal, count uint32) string {
 	return strings.ToLower(fmt.Sprintf("%s-%02d-of-%02d", prefix, ordinal, count))
 }
 
