@@ -119,24 +119,18 @@ func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.isBucketOwner != nil && bucket.IsBucketHost(r.Host) {
+		bkt := strings.Split(r.Host, ".")[0]
+		if !s.isBucketOwner(bkt) {
+			return
+		}
+	}
+
 	var upgrader websocket.Upgrader
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.logger.Errorw("error upgrading websocket", zap.Error(err))
 		return
-	}
-
-	if s.isBucketOwner != nil && bucket.IsBucketHost(r.Host) {
-		bkt := strings.Split(r.Host, ".")[0]
-		if !s.isBucketOwner(bkt) {
-			s.logger.Warn("Close the connection because not the owner of the bucket ", bkt)
-			err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(closeCodeTryAgain, "NotOwner"))
-			if err != nil {
-				s.logger.Errorf("Failed to send close message to client: %#v", err)
-			}
-			conn.Close()
-			return
-		}
 	}
 
 	handlerCh := make(chan struct{})
